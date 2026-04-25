@@ -191,12 +191,15 @@
   <script>
     // ── Config ──
     const API_BASE = (() => {
-      // Auto-detect if served from Hermes dashboard or standalone
       const u = new URL(location.href);
-      if (u.pathname.includes('/api/plugins')) return '';
-      return 'http://localhost:8765/api/plugins';
+      if (u.pathname.includes('/api/plugins')) {
+        // Served from Hermes dashboard — strip trailing slash
+        return u.pathname.replace(/\/$/, '');
+      }
+      // Standalone dev server
+      return 'http://localhost:8765/api/plugins/ratchet';
     })();
-    const RATCHET_API = `${API_BASE}/ratchet`;
+    const RATCHET_API = API_BASE;
 
     // ── State ──
     let experiments = [];
