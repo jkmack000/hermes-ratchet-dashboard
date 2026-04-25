@@ -1,39 +1,19 @@
-# Hermes Ratchet Dashboard Plugin - Backend
-
+"""
+Hermes Ratchet Dashboard Plugin - Backend
 A FastAPI backend plugin that watches an auto-optimization workspace (Git repo)
 and streams experiment telemetry to the frontend.
-
-## API Endpoints (mounted at /api/plugins/ratchet/)
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| /info | GET | Plugin info, workspace path, current status |
-| /experiments | GET | Full experiment history (sorted by commit time) |
-| /experiments/latest | GET | Current best experiment + running status |
-| /sse | GET | Server-Sent Events stream for live updates |
-| /config | POST | Update watched workspace path |
-
-## Data Model
-
-The backend expects a Git workspace with:
-- `score.txt` or `experiments.json` — per-commit scores
-- Git history — commit messages may contain `score:X.Y` or `ratchet:up/down`
-
-## Run standalone for testing:
-    uvicorn backend.ratchet:app --reload --port 8765
+"""
 
 import asyncio
 import json
 import os
 import re
 import subprocess
-import time
-from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncGenerator, Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -271,6 +251,14 @@ async def update_config(cfg: ConfigUpdate):
         global EXPERIMENTS
         EXPERIMENTS = fetch_git_history(str(ws))
     return {"workspace": str(ws), "experiments_loaded": len(EXPERIMENTS)}
+
+# Serve the dashboard HTML at the router root too
+_dash_html = Path(__file__).with_name("..").resolve() / "dashboard.html"
+@router.get("/", response_class=HTMLResponse)
+async def dashboard():
+    if _dash_html.exists():
+        return _dash_html.read_text(encoding="utf-8")
+    return HTMLResponse("<h1>Ratchet Plugin</h1><p>dashboard.html not found</p>")
 
 # ---------------------------------------------------------------------------
 # Standalone test harness  (uvicorn backend.ratchet:app --reload --port 8765)
