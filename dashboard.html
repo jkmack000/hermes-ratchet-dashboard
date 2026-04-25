@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ratchet Mode — Live</title>
+  <style>
+    /* ── CRT base ── */
+    :root {
+      --bg:      #060b14;
+      --grid:    #0b1729;
+      --cyan:    #00f0ff;
+      --green:   #00ff88;
+      --red:     #ff3860;
+      --amber:   #ffaa00;
+      --white:   #e0e6ed;
+      --dim:     #5a6a7a;
+      --font:    'JetBrains Mono', 'SF Mono', monospace;
+      --glow:    0 0 6px currentColor, 0 0 14px currentColor;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--white);
+      font-family: var(--font);
+      font-size: 13px;
+      line-height: 1.5;
+      overflow: hidden;
+      height: 100vh;
+      width: 100vw;
+    }
+
+    /* scanlines */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,0.25) 2px,
+        rgba(0,0,0,0.25) 4px
+      );
+      pointer-events: none;
+      z-index: 9999;
+    }
+
+    /* header bar */
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      height: 36px; padding: 0 14px;
+      background: var(--grid);
+      border-bottom: 1px solid #0f2a44;
+      font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    }
+    .topbar .logo { color: var(--cyan); font-weight: 700; }
+    .topbar .status { display: flex; gap: 18px; }
+    .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; }
+    .status-dot.on  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .status-dot.off { background: var(--red);  box-shadow: 0 0 6px var(--red); }
+
+    /* grid layout */
+    .grid {
+      display: grid;
+      grid-template-columns: 260px 1fr 280px;
+      grid-template-rows: 1fr 180px;
+      gap: 10px;
+      padding: 10px;
+      height: calc(100vh - 36px);
+    }
+    .panel {
+      background: var(--grid);
+      border: 1px solid #0f2a44;
+      border-radius: 4px;
+      padding: 12px;
+      overflow: hidden;
+      position: relative;
+    }
+    .panel::before {
+      content: attr(data-label);
+      position: absolute; top: 6px; left: 10px;
+      font-size: 10px; letter-spacing: 0.1em;
+      color: var(--dim); text-transform: uppercase;
+    }
+    .panel > .content { margin-top: 18px; height: calc(100% - 18px); overflow: auto; }
+
+    /* big numbers */
+    .big-num {
+      font-size: 32px; font-weight: 700;
+      color: var(--cyan); text-shadow: var(--glow);
+      margin: 4px 0;
+    }
+    .big-num.green { color: var(--green); }
+    .big-num.red   { color: var(--red); }
+    .big-num.amber { color: var(--amber); }
+
+    /* experiment list (left) */
+    .exp-list { display: flex; flex-direction: column; gap: 4px; }
+    .exp-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 4px 6px; border-radius: 3px;
+      font-size: 11px; cursor: default;
+    }
+    .exp-row:hover { background: rgba(0,240,255,0.06); }
+    .exp-row .hash  { color: var(--dim); width: 50px; }
+    .exp-row .score { width: 60px; text-align: right; font-weight: 600; }
+    .exp-row .delta { width: 50px; text-align: right; font-size: 10px; opacity: .8; }
+    .exp-row .msg   { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--dim); }
+    .exp-row.up   .score { color: var(--green); }
+    .exp-row.down .score { color: var(--red); }
+    .exp-row.up   .delta::before { content: '▲ '; color: var(--green); }
+    .exp-row.down .delta::before { content: '▼ '; color: var(--red); }
+
+    /* waterfall chart (center) */
+    canvas#waterfall { width: 100%; height: 100%; }
+
+    /* log tail (bottom, full width via grid spanning) */
+    .panel.logs { grid-column: 1 / -1; }
+    .log-lines { display: flex; flex-direction: column; gap: 2px; font-size: 11px; }
+    .log-line { display: flex; gap: 10px; }
+    .log-time { color: var(--dim); width: 80px; flex-shrink: 0; }
+    .log-msg  { color: var(--white); }
+    .log-msg.improved { color: var(--green); }
+    .log-msg.reverted { color: var(--red); }
+
+    /* right stats */
+    .stat-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #0f2a44; font-size: 12px; }
+    .stat-row:last-child { border: none; }
+    .stat-label { color: var(--dim); }
+    .stat-val   { font-weight: 600; }
+
+    /* scrollbar */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #1a3048; border-radius: 3px; }
+
+    /* blinking cursor for "running" */
+    @keyframes blink { 0%,49%{opacity:1} 50%,100%{opacity:0} }
+    .cursor { display:inline-block; width:7px; height:13px; background:var(--green); margin-left:4px; animation:blink 1s step-end infinite; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="logo">◈ RATCHET MODE</div>
+    <div class="status">
+      <span><span class="status-dot on" id="conn-dot"></span>STREAM</span>
+      <span id="run-label"><span class="status-dot on"></span>RUNNING<span class="cursor"></span></span>
+    </div>
+  </div>
+
+  <div class="grid">
+    <!-- LEFT: experiment history -->
+    <div class="panel" data-label="Experiment History">
+      <div class="content exp-list" id="exp-list"></div>
+    </div>
+
+    <!-- CENTER: waterfall + best score -->
+    <div class="panel" data-label="Score Waterfall">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
+        <div>
+          <div style="font-size:10px;color:var(--dim);">BEST SCORE</div>
+          <div class="big-num" id="best-score">—</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:10px;color:var(--dim);">EXPERIMENTS</div>
+          <div class="big-num green" id="total-exp">0</div>
+        </div>
+      </div>
+      <canvas id="waterfall"></canvas>
+    </div>
+
+    <!-- RIGHT: stats + config -->
+    <div class="panel" data-label="Telemetry">
+      <div class="content">
+        <div class="stat-row"><span class="stat-label">Workspace</span><span class="stat-val" id="ws-path" style="font-size:10px;">—</span></div>
+        <div class="stat-row"><span class="stat-label">Best Commit</span><span class="stat-val" id="best-commit">—</span></div>
+        <div class="stat-row"><span class="stat-label">Epoch</span><span class="stat-val" id="epoch-val">0</span></div>
+        <div class="stat-row"><span class="stat-label">Uptime</span><span class="stat-val" id="uptime">—</span></div>
+        <div style="margin-top:12px;font-size:10px;color:var(--dim);">LATEST ACTION</div>
+        <div id="latest-action" style="margin-top:4px;font-size:11px;color:var(--cyan);">Waiting for data…</div>
+      </div>
+    </div>
+
+    <!-- BOTTOM: git log tail -->
+    <div class="panel logs" data-label="System Log">
+      <div class="content log-lines" id="log-lines"></div>
+    </div>
+  </div>
+
+  <script>
+    // ── Config ──
+    const API_BASE = (() => {
+      // Auto-detect if served from Hermes dashboard or standalone
+      const u = new URL(location.href);
+      if (u.pathname.includes('/api/plugins')) return '';
+      return 'http://localhost:8765/api/plugins';
+    })();
+    const RATCHET_API = `${API_BASE}/ratchet`;
+
+    // ── State ──
+    let experiments = [];
+    let bestScore = Infinity;
+    let startTime = null;
+
+    // ── DOM refs ──
+    const el = {
+      bestScore: document.getElementById('best-score'),
+      totalExp:  document.getElementById('total-exp'),
+      expList:   document.getElementById('exp-list'),
+      canvas:    document.getElementById('waterfall'),
+      wsPath:    document.getElementById('ws-path'),
+      bestCommit:document.getElementById('best-commit'),
+      epoch:     document.getElementById('epoch-val'),
+      uptime:    document.getElementById('uptime'),
+      latest:    document.getElementById('latest-action'),
+      logLines:  document.getElementById('log-lines'),
+      runDot:    document.querySelector('#run-label .status-dot'),
+      runCursor: document.querySelector('#run-label .cursor'),
+    };
+
+    // ── Helpers ──
+    function fmtNum(n) {
+      if (n === Infinity || n === -Infinity || isNaN(n)) return '—';
+      if (Math.abs(n) >= 1000) return n.toFixed(1);
+      if (Math.abs(n) >= 1) return n.toFixed(3);
+      return n.toExponential(3);
+    }
+    function timeAgo(d) {
+      const s = Math.floor((Date.now() - new Date(d)) / 1000);
+      if (s < 60) return s + 's ago';
+      if (s < 3600) return Math.floor(s/60) + 'm ago';
+      return Math.floor(s/3600) + 'h ago';
+    }
+
+    // ── Render experiment list ──
+    function renderList() {
+      el.expList.innerHTML = '';
+      // Show last 40 experiments, newest at bottom
+      const slice = experiments.slice(-40);
+      slice.forEach(e => {
+        const row = document.createElement('div');
+        row.className = 'exp-row ' + (e.status === 'improved' ? 'up' : (e.status === 'reverted' ? 'down' : ''));
+        row.innerHTML = `
+          <span class="hash">${e.id}</span>
+          <span class="score">${fmtNum(e.score)}</span>
+          <span class="delta">${e.score_delta > 0 ? '+' : ''}${fmtNum(e.score_delta)}</span>
+          <span class="msg" title="${e.message}">${e.message}</span>
+        `;
+        el.expList.appendChild(row);
+      });
+      el.expList.scrollTop = el.expList.scrollHeight;
+    }
+
+    // ── Render waterfall chart on Canvas ──
+    function renderWaterfall() {
+      const c = el.canvas;
+      const ctx = c.getContext('2d');
+      const rect = c.parentElement.getBoundingClientRect();
+      c.width = rect.width - 24;
+      c.height = rect.height - 80; // leave room for header
+      const w = c.width, h = c.height;
+      ctx.clearRect(0,0,w,h);
+
+      if (experiments.length < 2) {
+        ctx.fillStyle = '#1a3048';
+        ctx.fillRect(0, h/2 - 1, w, 2);
+        return;
+      }
+
+      const scores = experiments.map(e => e.score);
+      const min = Math.min(...scores) * 0.98;
+      const max = Math.max(...scores) * 1.02;
+      const range = max - min || 1;
+      const dx = w / Math.max(scores.length, 20);
+
+      // Grid lines
+      ctx.strokeStyle = '#0f2a44';
+      ctx.lineWidth = 1;
+      for (let i=0;i<5;i++) {
+        const y = h - (h/5)*i;
+        ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke();
+      }
+
+      // Line
+      ctx.beginPath();
+      experiments.forEach((e, i) => {
+        const x = i * dx + dx/2;
+        const y = h - ((e.score - min) / range) * h;
+        if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      });
+      ctx.strokeStyle = 'rgba(0,240,255,0.5)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Dots + bars
+      experiments.forEach((e, i) => {
+        const x = i * dx + dx/2;
+        const y = h - ((e.score - min) / range) * h;
+        const barH = ((e.score - min) / range) * h;
+
+        // baseline bar
+        ctx.fillStyle = e.status === 'improved' ? 'rgba(0,255,136,0.15)' :
+                        e.status === 'reverted' ? 'rgba(255,56,96,0.15)' : 'rgba(0,240,255,0.08)';
+        ctx.fillRect(x - dx*0.35, h - barH, dx*0.7, barH);
+
+        // dot
+        ctx.beginPath();
+        ctx.arc(x, y, 3, 0, Math.PI*2);
+        ctx.fillStyle = e.status === 'improved' ? '#00ff88' :
+                        e.status === 'reverted' ? '#ff3860' : '#00f0ff';
+        ctx.fill();
+        if (e.status === 'improved') {
+          ctx.shadowColor = '#00ff88'; ctx.shadowBlur = 8;
+          ctx.fill(); ctx.shadowBlur = 0;
+        }
+      });
+    }
+
+    // ── Render logs ──
+    function renderLogs(state) {
+      if (!state.log_tail) return;
+      el.logLines.innerHTML = '';
+      state.log_tail.forEach(line => {
+        const div = document.createElement('div');
+        div.className = 'log-line';
+        const time = new Date().toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+        const cls = line.includes('improved') || line.includes('score:') ? 'improved' : (line.includes('reverted') ? 'reverted' : '');
+        div.innerHTML = `<span class="log-time">${time}</span><span class="log-msg ${cls}">${line}</span>`;
+        el.logLines.appendChild(div);
+      });
+      el.logLines.scrollTop = el.logLines.scrollHeight;
+    }
+
+    // ── Update from payload ──
+    function update(payload) {
+      const { state, latest, count } = payload;
+      if (!state) return;
+
+      // Update stats
+      el.bestScore.textContent = fmtNum(state.best_score);
+      el.totalExp.textContent = state.total_experiments;
+      el.wsPath.textContent = state.workspace ? state.workspace.replace(/^.*\//,'') : '—';
+      el.bestCommit.textContent = state.best_commit ? state.best_commit.slice(0,8) : '—';
+      el.epoch.textContent = state.current_epoch || count || 0;
+      if (state.start_time) startTime = new Date(state.start_time);
+      if (startTime) el.uptime.textContent = timeAgo(startTime).replace(' ago','');
+
+      // Running indicator
+      const running = state.running;
+      el.runDot.className = 'status-dot ' + (running ? 'on' : 'off');
+      el.runCursor.style.display = running ? 'inline-block' : 'none';
+
+      // Latest action
+      if (latest) {
+        const verb = latest.status === 'improved' ? 'RATCHET UP' : latest.status === 'reverted' ? 'RATchet DOWN' : 'BASELINE';
+        el.latest.innerHTML = `<b>${verb}</b> — ${latest.message || 'experiment'} <span style="color:var(--dim)">@ ${latest.id}</span>`;
+      }
+
+      // Refresh full history if count changed
+      if (count !== experiments.length) {
+        fetch(`${RATCHET_API}/experiments`)
+          .then(r => r.json())
+          .then(data => {
+            experiments = data;
+            renderList();
+            renderWaterfall();
+          });
+      }
+      renderLogs(state);
+    }
+
+    // ── SSE connection ──
+    function connectSSE() {
+      const src = new EventSource(`${RATCHET_API}/sse`);
+      src.onmessage = ev => {
+        try { update(JSON.parse(ev.data)); } catch(e) {}
+      };
+      src.onerror = () => {
+        document.getElementById('conn-dot').className = 'status-dot off';
+        setTimeout(connectSSE, 3000);
+      };
+    }
+
+    // ── Init ──
+    window.addEventListener('load', () => {
+      // Initial data load
+      fetch(`${RATCHET_API}/experiments`).then(r=>r.json()).then(data=>{
+        experiments = data;
+        renderList(); renderWaterfall();
+      });
+      fetch(`${RATCHET_API}/info`).then(r=>r.json()).then(state=>{
+        update({ state, count: experiments.length });
+      });
+      connectSSE();
+    });
+
+    // Re-render canvas on resize
+    window.addEventListener('resize', renderWaterfall);
+  </script>
+</body>
+</html>

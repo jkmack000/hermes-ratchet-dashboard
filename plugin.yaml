@@ -1,0 +1,38 @@
+# Hermes Agent Plugin Manifest
+# See: https://hermes-agent.nousresearch.com/docs/user-guide/features/extending-the-dashboard
+
+name: ratchet-dashboard
+version: 0.1.0
+description: |
+  Real-time dashboard for Karpathy-style "ratchet loop" auto-optimization experiments.
+  Watches a Git workspace and streams score history, experiment lineage, and live progress.
+type: backend+frontend
+author: jkmack000
+license: MIT
+
+backend:
+  mount_point: /api/plugins/ratchet
+  module: backend.ratchet
+  router: router
+
+frontend:
+  entry: dashboard.html
+  title: Ratchet Mode
+  icon: activity-pulse
+
+requirements:
+  - fastapi
+  - pydantic
+  - uvicorn
+
+config:
+  # Default workspace to watch (Git repo with score.txt or experiments.json)
+  workspace:
+    type: string
+    default: "~/auto-research"
+    env: RATCHET_WORKSPACE
+  # Poll interval in seconds
+  poll_interval:
+    type: integer
+    default: 2
+    env: RATCHET_POLL_INTERVAL
