@@ -115,20 +115,31 @@
     /* waterfall chart (center) */
     canvas#waterfall { width: 100%; height: 100%; }
 
-    /* log tail (bottom, full width via grid spanning) */
-    .panel.logs { grid-column: 1 / -1; }
-    .log-lines { display: flex; flex-direction: column; gap: 2px; font-size: 11px; }
-    .log-line { display: flex; gap: 10px; }
-    .log-time { color: var(--dim); width: 80px; flex-shrink: 0; }
-    .log-msg  { color: var(--white); }
-    .log-msg.improved { color: var(--green); }
-    .log-msg.reverted { color: var(--red); }
+    /* log tail (bottom) */
+    .panel.logs { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 0; border: none; background: transparent; }
+    .panel.logs .subpanel { background: var(--grid); border: 1px solid #0f2a44; border-radius: 4px; padding: 12px; overflow: hidden; position: relative; }
+    .panel.logs .subpanel::before {
+      content: attr(data-label);
+      position: absolute; top: 6px; left: 10px;
+      font-size: 10px; letter-spacing: 0.1em;
+      color: var(--dim); text-transform: uppercase;
+    }
+    .panel.logs .subpanel > .content { margin-top: 18px; height: calc(100% - 18px); overflow: auto; }
+    canvas#gitgraph { width: 100%; height: 100%; }
 
     /* right stats */
     .stat-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #0f2a44; font-size: 12px; }
     .stat-row:last-child { border: none; }
     .stat-label { color: var(--dim); }
     .stat-val   { font-weight: 600; }
+
+    /* log lines */
+    .log-lines { display: flex; flex-direction: column; gap: 2px; font-size: 11px; }
+    .log-line { display: flex; gap: 10px; }
+    .log-time { color: var(--dim); width: 80px; flex-shrink: 0; }
+    .log-msg  { color: var(--white); }
+    .log-msg.improved { color: var(--green); }
+    .log-msg.reverted { color: var(--red); }
 
     /* scrollbar */
     ::-webkit-scrollbar { width: 5px; }
@@ -182,9 +193,14 @@
       </div>
     </div>
 
-    <!-- BOTTOM: git log tail -->
-    <div class="panel logs" data-label="System Log">
-      <div class="content log-lines" id="log-lines"></div>
+    <!-- BOTTOM: git graph + logs -->
+    <div class="panel logs">
+      <div class="subpanel" data-label="Git Graph">
+        <div class="content"><canvas id="gitgraph"></canvas></div>
+      </div>
+      <div class="subpanel" data-label="System Log">
+        <div class="content log-lines" id="log-lines"></div>
+      </div>
     </div>
   </div>
 
@@ -320,7 +336,76 @@
       });
     }
 
-    // ── Render logs ──
+    // ── Render git graph on Canvas ──
+    function renderGitGraph() {
+      const c = document.getElementById('gitgraph');
+      if (!c) return;
+      const ctx = c.getContext('2d');
+      const rect = c.parentElement.getBoundingClientRect();
+      c.width = rect.width - 4;
+      c.height = rect.height - 4;
+      const w = c.width, h = c.height;
+      ctx.clearRect(0,0,w,h);
+
+      if (experiments.length < 2) {
+        ctx.fillStyle = '#1a3048';
+        ctx.fillRect(0, h/2 - 1, w, 2);
+        return;
+      }
+
+      const pad = 20;
+      const nodeR = 5;
+      const usableH = h - pad * 2;
+      const dy = usableH / Math.max(experiments.length, 10);
+      const cx = w / 2;
+
+      // Draw connecting line
+      ctx.beginPath();
+      ctx.strokeStyle = 'rgba(0,240,255,0.2)';
+      ctx.lineWidth = 2;
+      experiments.forEach((e, i) => {
+        const y = pad + i * dy;
+        if (i === 0) ctx.moveTo(cx, y); else ctx.lineTo(cx, y);
+      });
+      ctx.stroke();
+
+      // Draw nodes + labels
+      experiments.forEach((e, i) => {
+        const y = pad + i * dy;
+        const color = e.status === 'improved' ? '#00ff88' : e.status === 'reverted' ? '#ff3860' : '#00f0ff';
+
+        // Node glow for improved
+        if (e.status === 'improved') {
+          ctx.beginPath();
+          ctx.arc(cx, y, nodeR + 4, 0, Math.PI*2);
+          ctx.fillStyle = 'rgba(0,255,136,0.2)';
+          ctx.fill();
+        }
+
+        // Node
+        ctx.beginPath();
+        ctx.arc(cx, y, nodeR, 0, Math.PI*2);
+        ctx.fillStyle = color;
+        ctx.fill();
+
+        // Label left: hash
+        ctx.fillStyle = '#5a6a7a';
+        ctx.font = '10px JetBrains Mono, monospace';
+        ctx.textAlign = 'right';
+        ctx.fillText(e.id.slice(0,6), cx - 14, y + 3);
+
+        // Label right: message + score
+        ctx.fillStyle = '#e0e6ed';
+        ctx.textAlign = 'left';
+        const msg = (e.message || '').slice(0, 28);
+        ctx.fillText(msg, cx + 14, y + 3);
+
+        // Score far right
+        ctx.fillStyle = color;
+        ctx.textAlign = 'right';
+        ctx.fillText(fmtNum(e.score), w - 4, y + 3);
+      });
+    }
     function renderLogs(state) {
       if (!state.log_tail) return;
       el.logLines.innerHTML = '';
@@ -368,6 +453,7 @@
             experiments = data;
             renderList();
             renderWaterfall();
+            renderGitGraph();
           });
       }
       renderLogs(state);
@@ -390,7 +476,7 @@
       // Initial data load
       fetch(`${RATCHET_API}/experiments`).then(r=>r.json()).then(data=>{
         experiments = data;
-        renderList(); renderWaterfall();
+        renderList(); renderWaterfall(); renderGitGraph();
       });
       fetch(`${RATCHET_API}/info`).then(r=>r.json()).then(state=>{
         update({ state, count: experiments.length });
@@ -399,7 +485,7 @@
     });
 
     // Re-render canvas on resize
-    window.addEventListener('resize', renderWaterfall);
+    window.addEventListener('resize', () => { renderWaterfall(); renderGitGraph(); });
   </script>
 </body>
 </html>

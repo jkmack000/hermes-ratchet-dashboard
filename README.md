@@ -1,30 +1,124 @@
-# Hermes Ratchet Dashboard Plugin
+# Ratchet Mode — Live Training Dashboard
 
-A Hermes Agent dashboard plugin for the Nous Research 24-hour hackathon.
+> A Hermes Agent dashboard plugin for the Nous Research 24-hour hackathon.
 
-## Priority: Option 3 - Ratchet Mode Live Training Dashboard
+## What is this?
 
-### Goal
-Provide real-time visualization of iterative auto-optimization experiments, inspired by Karpathy's ratchet loop and our own `bwrap` sandbox orchestrator.
+Ratchet Mode visualizes iterative auto-optimization experiments in real time.
 
-### Architecture
-- **Backend Plugin**: FastAPI router mounted under `/api/plugins/ratchet/` that watches a target Git repository and exposes experiment telemetry.
-- **Frontend Plugin**: Retro-terminal styled dashboard showing live experiment progress, score waterfalls, and ratchet history.
-- **Data Source**: External git repository (typically an auto-research project) containing:
-  - `experiments.json` or `score.txt` files
-  - Git commit history as the source of truth for experiment lineage
-  - `program.md` for objective context
+Inspired by Karpathy's "ratchet loop" and our own `bwrap` sandbox orchestrator, this plugin turns a Git repository full of experiments into a live telemetry stream. Every commit is an experiment. Every score change is a data point. The dashboard shows you the optimization landscape as it unfolds.
 
-### Stretch: Option 1 - Agent Telemetry Dashboard
-Once Option 3 is stable, extend the backend to accept Hermes session telemetry for live resource monitoring.
+## The Metaphor
 
-### Future: Option 2 - Multi-Agent Network Visualizer
-If time permits, add a swarm topology view for `BwrapSandbox` IPC message passing.
+A ratchet only moves forward. In this dashboard:
+
+- **Green** = score improved (ratchet clicked up)
+- **Red** = score regressed (change was reverted)
+- **Cyan line** = the optimization trajectory over time
+
+The system watches your workspace Git repo, parses scores from commit messages or `score.txt`, and streams updates to the frontend via SSE.
+
+## Features
+
+| Feature | Description |
+|---------|-------------|
+| **Live SSE Stream** | Real-time updates as new commits land |
+| **Score Waterfall** | Canvas-rendered trajectory with glow effects |
+| **Experiment History** | Scrollable list with delta indicators |
+| **Git Graph Timeline** | Visual `git log --graph` in the terminal style |
+| **Self-Healing Loop** | Test harness + Claude Code auto-fixes dashboard bugs |
+| **Retro CRT UI** | Scanlines, cyan glow, monospace — terminal aesthetic |
+
+## Architecture
+
+```
+┌─────────────────┐      SSE       ┌──────────────────┐
+│   dashboard     │ ◄────────────  │  backend/ratchet │
+│  (vanilla JS)   │                │   (FastAPI)      │
+└─────────────────┘                └────────┬─────────┘
+                                            │
+                                     polls git every 2s
+                                            │
+                                            ▼
+                                    ┌───────────────┐
+                                    │ ~/auto-research│
+                                    │  (Git repo)    │
+                                    └───────────────┘
+```
+
+## Quick Start
+
+### Standalone (dev mode)
+
+```bash
+# Install deps
+uv sync
+
+# Start the backend
+uv run python backend/ratchet.py
+
+# Open dashboard
+curl http://localhost:8765/api/plugins/ratchet/
+```
+
+### As a Hermes Plugin
+
+Copy this directory into your Hermes Agent dashboard plugins path:
+
+```bash
+cp -r hermes-ratchet-dashboard/ ~/.hermes/dashboard/plugins/
+```
+
+The plugin mounts at `/api/plugins/ratchet/` and serves the dashboard HTML at the root.
+
+## Configuration
+
+| Env Var | Default | Description |
+|---------|---------|-------------|
+| `RATCHET_WORKSPACE` | `~/auto-research` | Git repo to watch |
+| `RATCHET_POLL_INTERVAL` | `2` | Git poll interval (seconds) |
+
+## Score Detection
+
+The backend tries these sources in order:
+
+1. Git commit message patterns: `score:1.234`, `best=3.14`, `loss:0.5`
+2. `score.txt` or `best_score.txt` in the workspace root
+3. `experiments.json` (reads `best_score` or last entry)
+
+## Self-Healing Ratchet Loop
+
+This plugin dogfoods itself. `ratchet_loop.py` runs `ratchet_test.py` against the dashboard. If the test score > 0 (validation errors), it invokes Claude Code to fix the code, re-tests, and commits only if the score improves.
+
+```bash
+python ratchet_loop.py
+```
+
+Max 5 fix attempts with exponential backoff. No runaway loops.
 
 ## Structure
-- `plugin.yaml` — Plugin manifest
-- `backend/` — FastAPI router + file watchers
-- `frontend/` — Vanilla JS + Canvas 2D dashboard (zero build step for speed)
 
-## Install
-Copy this directory into your Hermes Agent dashboard plugins path (or mount as a backend plugin).
+```
+.
+├── backend/
+│   └── ratchet.py          # FastAPI router + git watcher
+├── dashboard.html          # Retro CRT frontend (zero build)
+├── ratchet_test.py         # 7-point validation harness
+├── ratchet_loop.py         # Autonomous fix/commit loop
+├── plugin.yaml             # Hermes plugin manifest
+└── pyproject.toml          # Python deps
+```
+
+## Demo
+
+With `~/auto-research` running experiments, the dashboard shows:
+
+- Best score: **3.374** (big cyan number)
+- 16 experiments tracked
+- Waterfall chart showing improvement trajectory
+- Live git log stream
+- Status: `RUNNING █` (blinking cursor)
+
+## License
+
+MIT — built in 24 hours for the Nous Research hackathon.

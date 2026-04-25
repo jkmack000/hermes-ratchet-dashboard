@@ -13,7 +13,7 @@ REPO_DIR = Path(__file__).parent.resolve()
 TEST_SCRIPT = REPO_DIR / "ratchet_test.py"
 SERVER_CMD = [sys.executable, "backend/ratchet.py"]
 SERVER_ENV = os.environ.copy() | {"RATCHET_WORKSPACE": str(Path.home() / "auto-research")}
-MAX_ITER = 10
+MAX_ITER = 5
 
 def run_test():
     """Run ratchet_test.py against the running server. Returns (score, errors)."""
@@ -88,9 +88,22 @@ def main():
                 print("[REVERT] Score worsened. Resetting.")
                 subprocess.run(["git", "reset", "--hard", "HEAD"], cwd=str(REPO_DIR))
                 subprocess.run(["git", "stash", "pop"], cwd=str(REPO_DIR))
+                # Exponential backoff before next attempt
+                backoff = min(2 ** i, 60)
+                print(f"[WAIT] Backing off {backoff}s before next attempt...")
+                time.sleep(backoff)
         else:
             print("[SKIP] Claude returned non-zero. Reverting stash.")
             subprocess.run(["git", "stash", "pop"], cwd=str(REPO_DIR))
+            backoff = min(2 ** i, 60)
+            print(f"[WAIT] Backing off {backoff}s before next attempt...")
+            time.sleep(backoff)
+
+    if best_score > 0:
+        print(f"\n[EXHAUSTED] Reached max {MAX_ITER} attempts without reaching score 0.")
+        print("[EXHAUSTED] Final score:", best_score)
+        print("[EXHAUSTED] Remaining errors:", best_errors)
+        print("[EXHAUSTED] Manual intervention required.")
 
     server_proc.terminate()
     server_proc.wait(timeout=5)
