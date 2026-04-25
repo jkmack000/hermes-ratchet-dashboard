@@ -224,7 +224,17 @@ async def latest():
 @router.get("/sse")
 async def sse(request: Request):
     async def event_stream() -> AsyncGenerator[str, None]:
-        last_len = -1
+        # Send initial payload immediately
+        async with LOCK:
+            current_len = len(EXPERIMENTS)
+            payload = {
+                "state": STATE.model_dump(),
+                "latest": EXPERIMENTS[-1].model_dump() if EXPERIMENTS else None,
+                "count": current_len,
+            }
+        yield f"data: {json.dumps(payload)}\n\n"
+
+        last_len = current_len
         while True:
             await asyncio.sleep(1)
             if await request.is_disconnected():
