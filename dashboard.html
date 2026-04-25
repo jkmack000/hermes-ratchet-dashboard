@@ -560,31 +560,55 @@
       document.querySelector('.grid').style.display = name === 'ratchet' ? 'grid' : 'none';
       const tv = document.getElementById('telemetry-view');
       tv.classList.toggle('active', name === 'telemetry');
-      if (name === 'telemetry') { renderModelChart(); renderToolChart(); renderActivityChart(); }
+      if (name === 'telemetry') {
+        // Wait one frame for layout to compute sizes, then render charts
+        requestAnimationFrame(() => {
+          setTimeout(() => { renderModelChart(); renderToolChart(); renderActivityChart(); }, 50);
+        });
+      }
     }
 
     // ── Telemetry ──
     let telemetryData = { metrics: null, sessions: [], activity: [] };
+    let telemetryPoll = null;
 
     function loadTelemetry() {
-      fetch(`${RATCHET_API}/telemetry/metrics`).then(r=>r.json()).then(m => {
-        telemetryData.metrics = m;
-        updateTelemetryKPIs(m);
-        renderModelChart();
-        renderToolChart();
-        updatePlatformBreakdown(m);
-        updateTopTools(m);
-      });
-      fetch(`${RATCHET_API}/telemetry/sessions?limit=30`).then(r=>r.json()).then(s => {
-        telemetryData.sessions = s;
-        renderSessionList();
-      });
-      fetch(`${RATCHET_API}/telemetry/activity?hours=24`).then(r=>r.json()).then(a => {
-        telemetryData.activity = a;
-        renderActivityChart();
-      });
-      // Refresh every 10s
-      setTimeout(loadTelemetry, 10000);
+      clearTimeout(telemetryPoll);
+      fetch(`${RATCHET_API}/telemetry/metrics`)
+        .then(r => { if (!r.ok) throw new Error('metrics ' + r.status); return r.json(); })
+        .then(m => {
+          telemetryData.metrics = m;
+          updateTelemetryKPIs(m);
+          updatePlatformBreakdown(m);
+          updateTopTools(m);
+          // Only render charts if telemetry tab is visible
+          const tv = document.getElementById('telemetry-view');
+          if (tv && tv.classList.contains('active')) {
+            requestAnimationFrame(() => { renderModelChart(); renderToolChart(); });
+          }
+        })
+        .catch(e => console.error('[telemetry] metrics:', e.message));
+
+      fetch(`${RATCHET_API}/telemetry/sessions?limit=30`)
+        .then(r => { if (!r.ok) throw new Error('sessions ' + r.status); return r.json(); })
+        .then(s => {
+          telemetryData.sessions = s;
+          renderSessionList();
+        })
+        .catch(e => console.error('[telemetry] sessions:', e.message));
+
+      fetch(`${RATCHET_API}/telemetry/activity?hours=24`)
+        .then(r => { if (!r.ok) throw new Error('activity ' + r.status); return r.json(); })
+        .then(a => {
+          telemetryData.activity = a;
+          const tv = document.getElementById('telemetry-view');
+          if (tv && tv.classList.contains('active')) {
+            requestAnimationFrame(() => renderActivityChart());
+          }
+        })
+        .catch(e => console.error('[telemetry] activity:', e.message));
+
+      telemetryPoll = setTimeout(loadTelemetry, 5000);
     }
 
     function updateTelemetryKPIs(m) {
@@ -637,8 +661,9 @@
     function renderModelChart() {
       const c = document.getElementById('modelChart');
       if (!c) return;
-      const ctx = c.getContext('2d');
       const rect = c.parentElement.getBoundingClientRect();
+      if (rect.width < 10 || rect.height < 10) return;
+      const ctx = c.getContext('2d');
       c.width = rect.width - 4; c.height = rect.height - 4;
       const w = c.width, h = c.height;
       ctx.clearRect(0,0,w,h);
@@ -670,8 +695,9 @@
     function renderToolChart() {
       const c = document.getElementById('toolChart');
       if (!c) return;
-      const ctx = c.getContext('2d');
       const rect = c.parentElement.getBoundingClientRect();
+      if (rect.width < 10 || rect.height < 10) return;
+      const ctx = c.getContext('2d');
       c.width = rect.width - 4; c.height = rect.height - 4;
       const w = c.width, h = c.height;
       ctx.clearRect(0,0,w,h);
@@ -703,8 +729,9 @@
     function renderActivityChart() {
       const c = document.getElementById('activityChart');
       if (!c) return;
-      const ctx = c.getContext('2d');
       const rect = c.parentElement.getBoundingClientRect();
+      if (rect.width < 10 || rect.height < 10) return;
+      const ctx = c.getContext('2d');
       c.width = rect.width - 4; c.height = rect.height - 4;
       const w = c.width, h = c.height;
       ctx.clearRect(0,0,w,h);

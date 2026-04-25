@@ -25,9 +25,24 @@ The system watches your workspace Git repo, parses scores from commit messages o
 | **Live SSE Stream** | Real-time updates as new commits land |
 | **Score Waterfall** | Canvas-rendered trajectory with glow effects |
 | **Experiment History** | Scrollable list with delta indicators |
-| **Git Graph Timeline** | Visual `git log --graph` in the terminal style |
+| **Git Graph Timeline** | Visual `git log --graph` in terminal style |
+| **Agent Telemetry** | Live session metrics: tokens, tools, models, latency |
 | **Self-Healing Loop** | Test harness + Claude Code auto-fixes dashboard bugs |
 | **Retro CRT UI** | Scanlines, cyan glow, monospace — terminal aesthetic |
+
+## Two Modes
+
+### Ratchet Mode
+Monitors an auto-optimization Git repo. Every commit is an experiment. Shows score trajectory, experiment lineage, and live progress.
+
+### Agent Telemetry Mode
+Monitors the Hermes Agent itself by parsing `~/.hermes/sessions/*.jsonl`. Shows:
+- **KPIs**: Sessions (24h), estimated tokens, tool calls, errors
+- **Model Breakdown**: Which models are being used
+- **Tool Usage**: Frequency chart of tool calls
+- **Recent Sessions**: Duration, messages, tools per session
+- **Activity Sparkline**: Messages per hour over 24h
+- **Platform & Tool Breakdowns**
 
 ## Architecture
 
@@ -37,13 +52,11 @@ The system watches your workspace Git repo, parses scores from commit messages o
 │  (vanilla JS)   │                │   (FastAPI)      │
 └─────────────────┘                └────────┬─────────┘
                                             │
-                                     polls git every 2s
-                                            │
-                                            ▼
-                                    ┌───────────────┐
-                                    │ ~/auto-research│
-                                    │  (Git repo)    │
-                                    └───────────────┘
+                              ┌─────────────┬─────────────┐
+                              │  git watcher  │  session parser │
+                              │ ~/auto-research│ ~/.hermes/sessions│
+                              │  (Git repo)    │  (JSONL files)   │
+                              └─────────────┴─────────────┘
 ```
 
 ## Quick Start
@@ -101,8 +114,10 @@ Max 5 fix attempts with exponential backoff. No runaway loops.
 ```
 .
 ├── backend/
-│   └── ratchet.py          # FastAPI router + git watcher
-├── dashboard.html          # Retro CRT frontend (zero build)
+│   ├── __init__.py          # Package marker
+│   ├── ratchet.py           # FastAPI router + git watcher
+│   └── telemetry.py         # Hermes session parser
+├── dashboard.html          # Retro CRT frontend with tab switcher
 ├── ratchet_test.py         # 7-point validation harness
 ├── ratchet_loop.py         # Autonomous fix/commit loop
 ├── plugin.yaml             # Hermes plugin manifest
