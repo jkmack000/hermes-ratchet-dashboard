@@ -9,6 +9,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncGenerator, Optional
@@ -262,13 +263,39 @@ async def update_config(cfg: ConfigUpdate):
         EXPERIMENTS = fetch_git_history(str(ws))
     return {"workspace": str(ws), "experiments_loaded": len(EXPERIMENTS)}
 
+# ---------------------------------------------------------------------------
+# Telemetry endpoints (Idea 1)
+# ---------------------------------------------------------------------------
+
+# Ensure backend module is importable in standalone mode
+_project_root = Path(__file__).parent.parent.resolve()
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
+from backend.telemetry import load_sessions, get_aggregate_metrics, get_hourly_activity
+
+@router.get("/telemetry/sessions")
+async def telemetry_sessions(limit: int = 50):
+    sessions = load_sessions(limit=limit)
+    return sessions
+
+@router.get("/telemetry/metrics")
+async def telemetry_metrics():
+    sessions = load_sessions(limit=200)
+    return get_aggregate_metrics(sessions)
+
+@router.get("/telemetry/activity")
+async def telemetry_activity(hours: int = 24):
+    sessions = load_sessions(limit=200)
+    return get_hourly_activity(sessions, hours=hours)
+
 # Serve the dashboard HTML at the router root too
 _dash_html = Path(__file__).with_name("..").resolve() / "dashboard.html"
 @router.get("/", response_class=HTMLResponse)
 async def dashboard():
     if _dash_html.exists():
         return _dash_html.read_text(encoding="utf-8")
-    return HTMLResponse("<h1>Ratchet Plugin</h1><p>dashboard.html not found</p>")
+    return HTMLResponse("dashboard.html not found")
 
 # ---------------------------------------------------------------------------
 # Standalone test harness  (uvicorn backend.ratchet:app --reload --port 8765)

@@ -149,11 +149,49 @@
     /* blinking cursor for "running" */
     @keyframes blink { 0%,49%{opacity:1} 50%,100%{opacity:0} }
     .cursor { display:inline-block; width:7px; height:13px; background:var(--green); margin-left:4px; animation:blink 1s step-end infinite; }
+
+    /* tab switcher */
+    .tabs { display:flex; gap:2px; }
+    .tab {
+      padding: 4px 14px; cursor: pointer;
+      background: transparent; border: 1px solid transparent;
+      border-radius: 3px; font-size: 11px; letter-spacing: 0.05em;
+      color: var(--dim); text-transform: uppercase;
+    }
+    .tab:hover { color: var(--white); }
+    .tab.active { color: var(--cyan); border-color: #0f2a44; background: rgba(0,240,255,0.04); }
+
+    /* telemetry grid */
+    .telemetry-grid { display: none; }
+    .telemetry-grid.active { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; grid-template-rows: auto 1fr 180px; gap: 10px; padding: 10px; height: calc(100vh - 36px); }
+    .kpi-card {
+      background: var(--grid); border: 1px solid #0f2a44; border-radius: 4px;
+      padding: 14px; text-align: center;
+    }
+    .kpi-card .kpi-label { font-size: 10px; color: var(--dim); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 6px; }
+    .kpi-card .kpi-val { font-size: 26px; font-weight: 700; color: var(--cyan); text-shadow: var(--glow); }
+    .kpi-card .kpi-sub { font-size: 10px; color: var(--dim); margin-top: 4px; }
+    canvas#modelChart, canvas#toolChart, canvas#activityChart { width: 100%; height: 100%; }
+    .sess-list { display: flex; flex-direction: column; gap: 4px; }
+    .sess-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 4px 6px; border-radius: 3px; font-size: 11px;
+    }
+    .sess-row:hover { background: rgba(0,240,255,0.06); }
+    .sess-row .sid { color: var(--dim); width: 80px; }
+    .sess-row .dur { width: 50px; text-align: right; }
+    .sess-row .msgs { width: 40px; text-align: right; color: var(--cyan); }
+    .sess-row .tools { width: 40px; text-align: right; color: var(--green); }
+    .sess-row .model { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--dim); }
   </style>
 </head>
 <body>
   <div class="topbar">
     <div class="logo">◈ RATCHET MODE</div>
+    <div class="tabs">
+      <div class="tab active" data-tab="ratchet" onclick="switchTab('ratchet')">Ratchet</div>
+      <div class="tab" data-tab="telemetry" onclick="switchTab('telemetry')">Agent Telemetry</div>
+    </div>
     <div class="status">
       <span><span class="status-dot on" id="conn-dot"></span>STREAM</span>
       <span id="run-label"><span class="status-dot on"></span>RUNNING<span class="cursor"></span></span>
@@ -200,6 +238,34 @@
       </div>
       <div class="subpanel" data-label="System Log">
         <div class="content log-lines" id="log-lines"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TELEMETRY VIEW -->
+  <div class="telemetry-grid" id="telemetry-view">
+    <!-- KPI Row -->
+    <div class="kpi-card"><div class="kpi-label">Sessions (24h)</div><div class="kpi-val" id="t-sessions">0</div><div class="kpi-sub" id="t-sessions-sub">0 total</div></div>
+    <div class="kpi-card"><div class="kpi-label">Est. Tokens</div><div class="kpi-val" id="t-tokens">0</div><div class="kpi-sub" id="t-tokens-sub">~4 chars / token</div></div>
+    <div class="kpi-card"><div class="kpi-label">Tool Calls</div><div class="kpi-val" id="t-tools">0</div><div class="kpi-sub" id="t-tools-sub">all time</div></div>
+    <div class="kpi-card"><div class="kpi-label">Errors</div><div class="kpi-val" id="t-errors">0</div><div class="kpi-sub" id="t-errors-sub">last 200 sessions</div></div>
+
+    <!-- Model Breakdown -->
+    <div class="panel" data-label="Model Breakdown"><div class="content"><canvas id="modelChart"></canvas></div></div>
+    <!-- Tool Usage -->
+    <div class="panel" data-label="Tool Usage"><div class="content"><canvas id="toolChart"></canvas></div></div>
+    <!-- Recent Sessions -->
+    <div class="panel" data-label="Recent Sessions"><div class="content sess-list" id="sess-list"></div></div>
+    <!-- Activity Sparkline -->
+    <div class="panel" data-label="Messages / Hour"><div class="content"><canvas id="activityChart"></canvas></div></div>
+
+    <!-- Bottom: session detail -->
+    <div class="panel logs" style="grid-column: 1 / -1;">
+      <div class="subpanel" data-label="Platform Breakdown">
+        <div class="content" id="platform-breakdown" style="font-size:11px;"></div>
+      </div>
+      <div class="subpanel" data-label="Top Tools">
+        <div class="content" id="top-tools" style="font-size:11px;"></div>
       </div>
     </div>
   </div>
@@ -482,10 +548,191 @@
         update({ state, count: experiments.length });
       });
       connectSSE();
+      loadTelemetry();
     });
 
     // Re-render canvas on resize
-    window.addEventListener('resize', () => { renderWaterfall(); renderGitGraph(); });
+    window.addEventListener('resize', () => { renderWaterfall(); renderGitGraph(); renderModelChart(); renderToolChart(); renderActivityChart(); });
+
+    // ── Tab Switcher ──
+    function switchTab(name) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+      document.querySelector('.grid').style.display = name === 'ratchet' ? 'grid' : 'none';
+      const tv = document.getElementById('telemetry-view');
+      tv.classList.toggle('active', name === 'telemetry');
+      if (name === 'telemetry') { renderModelChart(); renderToolChart(); renderActivityChart(); }
+    }
+
+    // ── Telemetry ──
+    let telemetryData = { metrics: null, sessions: [], activity: [] };
+
+    function loadTelemetry() {
+      fetch(`${RATCHET_API}/telemetry/metrics`).then(r=>r.json()).then(m => {
+        telemetryData.metrics = m;
+        updateTelemetryKPIs(m);
+        renderModelChart();
+        renderToolChart();
+        updatePlatformBreakdown(m);
+        updateTopTools(m);
+      });
+      fetch(`${RATCHET_API}/telemetry/sessions?limit=30`).then(r=>r.json()).then(s => {
+        telemetryData.sessions = s;
+        renderSessionList();
+      });
+      fetch(`${RATCHET_API}/telemetry/activity?hours=24`).then(r=>r.json()).then(a => {
+        telemetryData.activity = a;
+        renderActivityChart();
+      });
+      // Refresh every 10s
+      setTimeout(loadTelemetry, 10000);
+    }
+
+    function updateTelemetryKPIs(m) {
+      document.getElementById('t-sessions').textContent = m.active_last_day || 0;
+      document.getElementById('t-sessions-sub').textContent = (m.total_sessions || 0) + ' total';
+      document.getElementById('t-tokens').textContent = fmtBig(m.total_est_tokens || 0);
+      document.getElementById('t-tools').textContent = m.total_tool_calls || 0;
+      document.getElementById('t-errors').textContent = m.total_errors || 0;
+    }
+
+    function fmtBig(n) {
+      if (n >= 1e6) return (n/1e6).toFixed(1) + 'M';
+      if (n >= 1e3) return (n/1e3).toFixed(1) + 'k';
+      return n;
+    }
+
+    function renderSessionList() {
+      const el = document.getElementById('sess-list');
+      el.innerHTML = '';
+      telemetryData.sessions.slice(0, 40).forEach(s => {
+        const row = document.createElement('div');
+        row.className = 'sess-row';
+        const modelShort = s.model ? s.model.split('/').pop().slice(0, 16) : 'unknown';
+        row.innerHTML = `
+          <span class="sid">${s.id.slice(-8)}</span>
+          <span class="dur">${Math.round(s.duration_sec)}s</span>
+          <span class="msgs">${s.messages}</span>
+          <span class="tools">${s.tool_calls}</span>
+          <span class="model" title="${s.model}">${modelShort}</span>
+        `;
+        el.appendChild(row);
+      });
+    }
+
+    function updatePlatformBreakdown(m) {
+      const el = document.getElementById('platform-breakdown');
+      if (!m.platform_breakdown) { el.innerHTML = 'No data'; return; }
+      const entries = Object.entries(m.platform_breakdown).sort((a,b) => b[1]-a[1]);
+      el.innerHTML = entries.map(([p, c]) => `<div style="display:flex;justify-content:space-between;padding:2px 0;"><span>${p}</span><span style="color:var(--cyan)">${c}</span></div>`).join('');
+    }
+
+    function updateTopTools(m) {
+      const el = document.getElementById('top-tools');
+      if (!m.tool_breakdown) { el.innerHTML = 'No data'; return; }
+      const entries = Object.entries(m.tool_breakdown).sort((a,b) => b[1]-a[1]).slice(0, 12);
+      el.innerHTML = entries.map(([t, c]) => `<div style="display:flex;justify-content:space-between;padding:2px 0;"><span>${t}</span><span style="color:var(--green)">${c}</span></div>`).join('');
+    }
+
+    // ── Canvas charts for telemetry ──
+    function renderModelChart() {
+      const c = document.getElementById('modelChart');
+      if (!c) return;
+      const ctx = c.getContext('2d');
+      const rect = c.parentElement.getBoundingClientRect();
+      c.width = rect.width - 4; c.height = rect.height - 4;
+      const w = c.width, h = c.height;
+      ctx.clearRect(0,0,w,h);
+
+      const m = telemetryData.metrics;
+      if (!m || !m.model_breakdown) { ctx.fillStyle='#1a3048'; ctx.fillRect(0,h/2-1,w,2); return; }
+      const entries = Object.entries(m.model_breakdown).sort((a,b) => b[1]-a[1]).slice(0, 6);
+      if (entries.length === 0) return;
+      const max = Math.max(...entries.map(e => e[1]));
+      const barH = (h - 30) / entries.length;
+      const colors = ['#00f0ff','#00ff88','#ffaa00','#ff3860','#9966ff','#5a6a7a'];
+
+      entries.forEach(([name, count], i) => {
+        const y = 10 + i * barH;
+        const bw = (count / max) * (w - 100);
+        const shortName = name.split('/').pop().slice(0, 18);
+        ctx.fillStyle = colors[i % colors.length];
+        ctx.fillRect(80, y + 4, bw, barH - 8);
+        ctx.fillStyle = '#e0e6ed';
+        ctx.textAlign = 'right';
+        ctx.font = '10px monospace';
+        ctx.fillText(shortName, 75, y + barH/2 + 3);
+        ctx.textAlign = 'left';
+        ctx.fillStyle = colors[i % colors.length];
+        ctx.fillText(count, 85 + bw + 4, y + barH/2 + 3);
+      });
+    }
+
+    function renderToolChart() {
+      const c = document.getElementById('toolChart');
+      if (!c) return;
+      const ctx = c.getContext('2d');
+      const rect = c.parentElement.getBoundingClientRect();
+      c.width = rect.width - 4; c.height = rect.height - 4;
+      const w = c.width, h = c.height;
+      ctx.clearRect(0,0,w,h);
+
+      const m = telemetryData.metrics;
+      if (!m || !m.tool_breakdown) { ctx.fillStyle='#1a3048'; ctx.fillRect(0,h/2-1,w,2); return; }
+      const entries = Object.entries(m.tool_breakdown).sort((a,b) => b[1]-a[1]).slice(0, 8);
+      if (entries.length === 0) return;
+      const max = Math.max(...entries.map(e => e[1]));
+      const barH = (h - 30) / entries.length;
+      const colors = ['#00ff88','#00f0ff','#ffaa00','#ff3860','#9966ff','#5a6a7a','#44ff44','#ff44ff'];
+
+      entries.forEach(([name, count], i) => {
+        const y = 10 + i * barH;
+        const bw = (count / max) * (w - 100);
+        const shortName = name.replace(/_/g, ' ').slice(0, 16);
+        ctx.fillStyle = colors[i % colors.length];
+        ctx.fillRect(80, y + 4, bw, barH - 8);
+        ctx.fillStyle = '#e0e6ed';
+        ctx.textAlign = 'right';
+        ctx.font = '10px monospace';
+        ctx.fillText(shortName, 75, y + barH/2 + 3);
+        ctx.textAlign = 'left';
+        ctx.fillStyle = colors[i % colors.length];
+        ctx.fillText(count, 85 + bw + 4, y + barH/2 + 3);
+      });
+    }
+
+    function renderActivityChart() {
+      const c = document.getElementById('activityChart');
+      if (!c) return;
+      const ctx = c.getContext('2d');
+      const rect = c.parentElement.getBoundingClientRect();
+      c.width = rect.width - 4; c.height = rect.height - 4;
+      const w = c.width, h = c.height;
+      ctx.clearRect(0,0,w,h);
+
+      const data = telemetryData.activity;
+      if (!data || data.length === 0) { ctx.fillStyle='#1a3048'; ctx.fillRect(0,h/2-1,w,2); return; }
+      const max = Math.max(...data.map(d => d.messages), 1);
+      const dx = w / data.length;
+
+      ctx.beginPath();
+      ctx.strokeStyle = 'rgba(0,240,255,0.5)';
+      ctx.lineWidth = 2;
+      data.forEach((d, i) => {
+        const x = i * dx + dx/2;
+        const y = h - ((d.messages / max) * (h - 20)) - 10;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+
+      data.forEach((d, i) => {
+        const x = i * dx + dx/2;
+        const y = h - ((d.messages / max) * (h - 20)) - 10;
+        ctx.beginPath();
+        ctx.arc(x, y, 2, 0, Math.PI*2);
+        ctx.fillStyle = '#00f0ff';
+        ctx.fill();
+      });
+    }
   </script>
 </body>
 </html>
