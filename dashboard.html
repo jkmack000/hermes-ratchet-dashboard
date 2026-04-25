@@ -141,6 +141,25 @@
     .log-msg.improved { color: var(--green); }
     .log-msg.reverted { color: var(--red); }
 
+    /* ── popup/toast for active action ── */
+    .toast-pop {
+      position: fixed; bottom: 18px; right: 18px;
+      background: rgba(0,240,255,0.08); border: 1px solid var(--cyan);
+      border-radius: 4px; padding: 10px 14px; font-size: 11px;
+      box-shadow: 0 0 12px rgba(0,240,255,0.15); z-index: 10000;
+      pointer-events: none; opacity: 0; transform: translateY(20px);
+      transition: opacity 0.4s, transform 0.4s;
+      max-width: 280px;
+    }
+    .toast-pop.active { opacity: 1; transform: translateY(0); }
+    .toast-pop .tt-header { color: var(--cyan); font-weight: 700; margin-bottom: 4px; }
+    .toast-pop .tt-body  { color: var(--white); }
+    .toast-pop .tt-sml  { color: var(--dim); font-size: 10px; margin-top: 4px; }
+    .toast-pop .tt-glow { box-shadow: 0 0 18px var(--cyan); }
+
+    /* blink badge on header */
+    .topbar .status .pulse { animation: blink 1s step-end infinite; }
+
     /* scrollbar */
     ::-webkit-scrollbar { width: 5px; }
     ::-webkit-scrollbar-track { background: transparent; }
@@ -526,10 +545,46 @@
     }
 
     // ── SSE connection ──
+    let _expCount = 0;
+    let _toastT   = null;
+
+    function showToast(title, body, sub) {
+      const old = document.getElementById('ratchet-toast');
+      if (old) old.remove();
+      const toast = document.createElement('div');
+      toast.id = 'ratchet-toast';
+      toast.className = 'toast-pop';
+      const c = title.includes('BEST') ? '#00ff88' :
+                title.includes('REVERT') ? '#ff3860' : '#00f0ff';
+      toast.style.borderColor = c;
+      toast.innerHTML = `
+        
+        ${sub ? `${sub}` : ''}
+      `;
+      document.body.appendChild(toast);
+      requestAnimationFrame(() => requestAnimationFrame(() => toast.classList.add('active')));
+      if (_toastT) clearTimeout(_toastT);
+      _toastT = setTimeout(() => { toast.classList.remove('active'); setTimeout(()=>toast.remove(),500); }, 6000);
+    }
+
     function connectSSE() {
       const src = new EventSource(`${RATCHET_API}/sse`);
       src.onmessage = ev => {
-        try { update(JSON.parse(ev.data)); } catch(e) {}
+        let payload;
+        try { payload = JSON.parse(ev.data); } catch(e) { return; }
+        if (!payload.state) return;
+        update(payload);
+
+        const cnt = payload.count || 0;
+        const lat = payload.latest;
+        if (cnt > _expCount && _expCount > 0 && lat) {
+          const label = lat.status === 'improved' ? 'NEW BEST ↑' :
+                        lat.status === 'reverted' ? 'REVERTED ↓' : 'NEW EXP';
+          const body  = `#${lat.id?.slice(0,7)||''} — score ${fmtNum(lat.score)}\n${(lat.message||'').slice(0,48)}`;
+          const sub   = (payload.state.workspace||'').replace(/^.*\//,'');
+          showToast(`◆ ${label}`, body, `workspace: ${sub}`);
+        }
+        _expCount = cnt;
       };
       src.onerror = () => {
         document.getElementById('conn-dot').className = 'status-dot off';
